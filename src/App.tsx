@@ -37,6 +37,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 import Markdown from 'react-markdown';
 import { cn } from '@/src/lib/utils';
+import { useAuth } from './lib/AuthContext';
+import { supabase } from './lib/supabase';
 
 // Initialize Gemini
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
@@ -84,9 +86,15 @@ const Logo = ({ className = "", light = false }: { className?: string, light?: b
 );
 
 export default function App() {
+  const { session, signOut } = useAuth();
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [toast, setToast] = useState<string | null>(null);
   
@@ -103,6 +111,31 @@ export default function App() {
   const showToast = (message: string) => {
     setToast(message);
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleAuth = async () => {
+    if (!authEmail || !authPassword) {
+      showToast("Ingresa email y contraseña");
+      return;
+    }
+    setAuthLoading(true);
+    try {
+      if (isSignUp) {
+        const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+        if (error) throw error;
+        showToast("¡Registro exitoso! Revisa tu email para confirmar.");
+        setIsLoginOpen(false);
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+        if (error) throw error;
+        showToast("Sesión iniciada correctamente.");
+        setIsLoginOpen(false);
+      }
+    } catch (error: any) {
+      showToast(error.message || "Ocurrió un error.");
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   const scrollToBottom = () => {
@@ -174,12 +207,21 @@ export default function App() {
             >
               <ShoppingCart className="w-5 h-5" />
             </button>
-            <button 
-              onClick={() => setIsLoginOpen(true)}
-              className="bg-emerald-600 text-white px-5 py-2 rounded-full text-sm font-semibold hover:bg-emerald-700 transition-all shadow-md hover:shadow-lg active:scale-95"
-            >
-              Iniciar Sesión
-            </button>
+            {session ? (
+              <button 
+                onClick={signOut}
+                className="bg-emerald-100 text-emerald-800 px-5 py-2 rounded-full text-sm font-semibold hover:bg-emerald-200 transition-all shadow-md active:scale-95 border border-emerald-200"
+              >
+                Cerrar Sesión
+              </button>
+            ) : (
+              <button 
+                onClick={() => setIsLoginOpen(true)}
+                className="bg-emerald-600 text-white px-5 py-2 rounded-full text-sm font-semibold hover:bg-emerald-700 transition-all shadow-md hover:shadow-lg active:scale-95"
+              >
+                Iniciar Sesión
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -811,7 +853,7 @@ export default function App() {
               className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] md:w-[450px] bg-white z-[90] shadow-2xl p-8 rounded-3xl"
             >
               <div className="flex items-center justify-between mb-8">
-                <h3 className="text-2xl font-bold">Iniciar Sesión</h3>
+                <h3 className="text-2xl font-bold">{isSignUp ? 'Crear Cuenta' : 'Iniciar Sesión'}</h3>
                 <button onClick={() => setIsLoginOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                   <X className="w-6 h-6" />
                 </button>
@@ -819,20 +861,21 @@ export default function App() {
               <div className="space-y-6">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Email</label>
-                  <input type="email" placeholder="tu@email.com" className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none" />
+                  <input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="tu@email.com" className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Contraseña</label>
-                  <input type="password" placeholder="••••••••" className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none" />
+                  <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="••••••••" className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none" />
                 </div>
                 <button 
-                  onClick={() => showToast("Funcionalidad de login en desarrollo")}
-                  className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition-all"
+                  onClick={handleAuth}
+                  disabled={authLoading}
+                  className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition-all flex items-center justify-center disabled:opacity-70 disabled:cursor-not-allowed"
                 >
-                  Entrar
+                  {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : (isSignUp ? 'Registrarse' : 'Entrar')}
                 </button>
                 <div className="text-center text-sm text-gray-500">
-                  ¿No tienes cuenta? <button className="text-emerald-600 font-bold hover:underline">Regístrate</button>
+                  {isSignUp ? '¿Ya tienes cuenta?' : '¿No tienes cuenta?'} <button onClick={() => setIsSignUp(!isSignUp)} className="text-emerald-600 font-bold hover:underline transition-colors">{isSignUp ? 'Inicia Sesión' : 'Regístrate'}</button>
                 </div>
               </div>
             </motion.div>
