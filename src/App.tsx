@@ -97,6 +97,10 @@ export default function App() {
   
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  // New States for Database & Yape
+  const [cartItems, setCartItems] = useState<any[]>([]);
+  const [isYapeOpen, setIsYapeOpen] = useState(false);
   
   // Form States
   const [skinType, setSkinType] = useState('');
@@ -111,6 +115,38 @@ export default function App() {
   const showToast = (message: string) => {
     setToast(message);
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const loadCart = async () => {
+    if (!session) return;
+    const { data, error } = await supabase.from('cart_items').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false });
+    if (!error && data) setCartItems(data);
+  };
+
+  useEffect(() => {
+    if (session) loadCart();
+    else setCartItems([]);
+  }, [session]);
+
+  const handleAddToCart = async (product: any) => {
+    if (!session) {
+      showToast("Debes iniciar sesión para comprar");
+      setIsLoginOpen(true);
+      return;
+    }
+    const priceNumber = parseFloat(product.price.replace('S/ ', '').replace(',', ''));
+    const { error } = await supabase.from('cart_items').insert({
+      user_id: session.user.id,
+      product_name: product.name,
+      price: priceNumber,
+      quantity: 1
+    });
+    if (error) {
+      showToast("Error al añadir al carrito");
+    } else {
+      showToast("Producto añadido al carrito");
+      loadCart();
+    }
   };
 
   const handleAuth = async () => {
@@ -169,8 +205,19 @@ export default function App() {
       });
 
       const response = await chat.sendMessage({ message: messageToSend });
-      const modelMessage: Message = { role: 'model', text: response.text || 'Lo siento, no pude procesar tu solicitud.' };
+      const responseText = response.text || 'Lo siento, no pude procesar tu solicitud.';
+      const modelMessage: Message = { role: 'model', text: responseText };
       setChatHistory(prev => [...prev, modelMessage]);
+
+      if (session && messageToSend.includes("generar una fórmula personalizada")) {
+        await supabase.from('formulas').insert({
+          user_id: session.user.id,
+          skin_type: skinType || 'No especificado',
+          goal: goal || 'No especificado',
+          ingredients: ingredients.length > 0 ? ingredients : ['Ninguno'],
+          response: responseText
+        });
+      }
     } catch (error) {
       console.error("Chat Error:", error);
       setChatHistory(prev => [...prev, { role: 'model', text: 'Hubo un error al conectar con Pachamama GPT. Por favor, intenta de nuevo.' }]);
@@ -819,18 +866,100 @@ export default function App() {
                   <X className="w-6 h-6" />
                 </button>
               </div>
-              <div className="flex-1 flex flex-col items-center justify-center text-center">
-                <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-6">
-                  <ShoppingCart className="w-10 h-10 text-gray-400" />
-                </div>
-                <h4 className="text-xl font-bold mb-2">Tu carrito está vacío</h4>
-                <p className="text-gray-500 mb-8">¡Explora nuestros productos y encuentra algo especial para tu piel!</p>
-                <button 
-                  onClick={() => setIsCartOpen(false)}
-                  className="bg-emerald-600 text-white px-8 py-3 rounded-full font-bold hover:bg-emerald-700 transition-all"
-                >
-                  Seguir Comprando
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {!session ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center">
+                    <h4 className="text-xl font-bold mb-2">Inicia Sesión</h4>
+                    <p className="text-gray-500 mb-8">Debes iniciar sesión para ver tu carrito.</p>
+                    <button onClick={() => { setIsCartOpen(false); setIsLoginOpen(true); }} className="bg-emerald-600 text-white px-8 py-3 rounded-full font-bold hover:bg-emerald-700">Iniciar Sesión</button>
+                  </div>
+                ) : cartItems.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center">
+                    <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-6">
+                      <ShoppingCart className="w-10 h-10 text-gray-400" />
+                    </div>
+                    <h4 className="text-xl font-bold mb-2">Tu carrito está vacío</h4>
+                    <p className="text-gray-500 mb-8">¡Explora nuestros productos y encuentra algo especial para tu piel!</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+                      {cartItems.map((item) => (
+                        <div key={item.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-xl border border-gray-100">
+                          <div>
+                            <h5 className="font-bold text-gray-900">{item.product_name}</h5>
+                            <p className="text-emerald-600 font-semibold">S/ {Number(item.price).toFixed(2)}</p>
+                          </div>
+                          <button onClick={async () => {
+                            await supabase.from('cart_items').delete().eq('id', item.id);
+                            loadCart();
+                          }} className="text-red-500 hover:bg-red-50 p-2 rounded-lg"><X className="w-5 h-5"/></button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="border-t border-gray-100 pt-6 mt-4">
+                      <div className="flex justify-between items-center mb-6">
+                        <span className="font-bold text-lg">Total a Pagar</span>
+                        <span className="font-black text-3xl text-[#740F6B]">S/ {cartItems.reduce((acc, item) => acc + Number(item.price), 0).toFixed(2)}</span>
+                      </div>
+                      <button onClick={() => { setIsCartOpen(false); setIsYapeOpen(true); }} className="w-full bg-[#00E4B0] text-[#740F6B] py-4 rounded-xl font-black text-lg hover:bg-[#00c99b] transition-all flex justify-center items-center gap-2">
+                        Pagar con Yape
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+
+        {/* Yape Modal */}
+        {isYapeOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsYapeOpen(false)}
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[80]"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] md:w-[400px] bg-white z-[90] shadow-2xl rounded-3xl overflow-hidden"
+            >
+              <div className="bg-[#740F6B] p-6 text-white text-center relative">
+                <button onClick={() => setIsYapeOpen(false)} className="absolute right-4 top-4 p-2 hover:bg-white/10 rounded-full transition-colors">
+                  <X className="w-6 h-6" />
                 </button>
+                <div className="bg-[#00E4B0] w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-2 shadow-lg">
+                  <span className="font-black text-[#740F6B] text-2xl">Y</span>
+                </div>
+                <h3 className="text-xl font-bold">Paga con Yape</h3>
+              </div>
+              <div className="p-8 flex flex-col items-center text-center">
+                <p className="text-gray-500 mb-6">Escanea el código QR desde tu aplicación para transferir <strong className="text-gray-900">S/ {cartItems.reduce((acc, item) => acc + Number(item.price), 0).toFixed(2)}</strong>.</p>
+                
+                <div className="bg-white p-3 rounded-2xl mb-6 shadow-md border-4 border-[#00E4B0]">
+                  <img src="/yape-qr.jpg" alt="QR Yape" className="w-48 h-48 rounded-xl object-contain" />
+                </div>
+                
+                <div className="bg-[#740F6B]/5 rounded-2xl p-4 w-full mb-6 border border-[#740F6B]/10">
+                  <p className="text-xs text-gray-500 mb-1 uppercase tracking-wider font-semibold">Titular</p>
+                  <p className="font-bold text-[#740F6B] truncate">Engelberth Paolo Egoavil Palomino</p>
+                  <p className="text-xs text-gray-500 mt-4 mb-1 uppercase tracking-wider font-semibold">Celular</p>
+                  <p className="font-black text-[#740F6B] text-2xl tracking-widest">958 050 928</p>
+                </div>
+                
+                <a 
+                  href={`https://wa.me/51958050928?text=Hola%20Paolo,%20acabo%20de%20realizar%20un%20pago%20por%20Yape%20de%20S/%20${cartItems.reduce((acc, item) => acc + Number(item.price), 0).toFixed(2)}%20por%20mis%20productos%20en%20Saphi%20Kuna%20Labs.%20Adjunto%20mi%20comprobante:`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full bg-[#00E4B0] text-[#740F6B] py-4 rounded-xl font-black text-lg hover:bg-[#00c99b] transition-all flex items-center justify-center shadow-lg hover:shadow-xl active:scale-95"
+                >
+                  Confirmar por WhatsApp
+                </a>
               </div>
             </motion.div>
           </>
