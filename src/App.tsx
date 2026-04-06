@@ -39,7 +39,8 @@ import Markdown from 'react-markdown';
 import { cn } from '@/src/lib/utils';
 
 // Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
+const ai = new GoogleGenAI({ apiKey: apiKey });
 
 interface Message {
   role: 'user' | 'model';
